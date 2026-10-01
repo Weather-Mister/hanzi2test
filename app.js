@@ -20,6 +20,8 @@ const state = {
   unitCache:new Map(),
   quiz:null,
   reading:null,
+  readingPinyin:false,
+  readingChecked:false,
   search:'',
 };
 
@@ -354,22 +356,25 @@ function renderReadingList(){
   bindCommon();document.querySelectorAll('[data-reading]').forEach(b=>b.onclick=()=>openReading(b.dataset.reading));
 }
 function openReading(id){
-  state.reading=state.readings.find(r=>r.id===id);renderReading();
+  state.reading=state.readings.find(r=>r.id===id);
+  state.readingPinyin=false;
+  state.readingChecked=false;
+  renderReading();
 }
 function renderReading(){
   const r=state.reading;if(!r){renderReadingList();return;}
   app.innerHTML='<div class="reading-main"><button class="backbtn" data-reading-back>‹</button><div class="kicker ink">'+esc(r.kind)+' · '+esc(r.unitId)+'</div><h1>'+esc(r.title)+'</h1><p class="reading-setup">'+esc(r.setup||'')+'</p>'+
-   '<div class="reading-tools"><button class="inkbutton" id="toggleReadingPinyin">'+(state.pinyin?'Hide':'Reveal')+' pinyin</button></div>'+
-   '<div class="reading-passage">'+r.lines.map((l,i)=>'<article class="reading-line"><span class="reading-line-number">'+(i+1)+'</span><div>'+(l.speaker?'<small class="speaker">'+esc(l.speaker)+'</small>':'')+'<p class="reading-chinese">'+esc(l.text)+'</p>'+(state.pinyin?'<p class="reading-pinyin">'+esc(l.pinyin)+'</p>':'')+'<button class="text-link" data-speak="'+esc(l.text)+'">聽 · listen</button></div></article>').join('')+'</div>'+
+   '<div class="reading-tools"><button class="inkbutton" id="toggleReadingPinyin">'+(state.readingPinyin?'Hide':'Reveal')+' pinyin</button></div>'+
+   '<div class="reading-passage">'+r.lines.map((l,i)=>'<article class="reading-line"><span class="reading-line-number">'+(i+1)+'</span><div>'+(l.speaker?'<small class="speaker">'+esc(l.speaker)+'</small>':'')+'<p class="reading-chinese">'+esc(l.text)+'</p>'+(state.readingPinyin?'<p class="reading-pinyin">'+esc(l.pinyin)+'</p>':'')+'<button class="text-link" data-speak="'+esc(l.text)+'">聽 · listen</button></div></article>').join('')+'</div>'+
    '<section class="reading-questions"><h2>Comprehension</h2>'+r.questions.map((q,qi)=>'<fieldset class="reading-question"><legend><span>'+(qi+1)+'</span>'+esc(q.prompt)+'</legend><div class="reading-options">'+q.options.map((o,oi)=>'<label class="reading-option"><input type="radio" name="rq'+qi+'" value="'+oi+'"><span>'+esc(o)+'</span></label>').join('')+'</div><div class="rq-feedback" id="rqf'+qi+'"></div></fieldset>').join('')+'<button class="inkbutton red" id="checkReading">Check answers</button></section>'+
-   '<details class="walkthrough"><summary>After the questions · full explanation</summary><div class="translation-block">'+r.lines.map((l,i)=>'<article><b>'+esc(l.text)+'</b><p>'+esc(l.translation)+'</p><small>'+esc(l.note||'')+'</small></article>').join('')+'</div>'+(r.tips?.length?'<div class="reading-tips"><h3>Reading tips</h3><ul>'+r.tips.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul></div>':'')+'</details></div>';
+   (state.readingChecked?'<section class="walkthrough open-walkthrough"><div class="sheet-kicker">AFTER THE QUESTIONS</div><h2>解讀 · Full explanation</h2><div class="translation-block">'+r.lines.map((l,i)=>'<article><b>'+esc(l.text)+'</b><p class="reading-pinyin">'+esc(l.pinyin)+'</p><p>'+esc(l.translation)+'</p><small>'+esc(l.note||'')+'</small></article>').join('')+'</div>'+(r.tips?.length?'<div class="reading-tips"><h3>Reading tips</h3><ul>'+r.tips.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul></div>':'')+(r.grammarFocus?.length?'<div class="reading-tips"><h3>Grammar focus</h3><p>'+esc(r.grammarFocus.join(' · '))+'</p></div>':'')+'</section>':'')+'</div>';
   document.querySelector('[data-reading-back]').onclick=()=>{state.reading=null;renderReadingList();};
-  document.getElementById('toggleReadingPinyin').onclick=()=>{state.pinyin=!state.pinyin;save();renderReading();};
+  document.getElementById('toggleReadingPinyin').onclick=()=>{state.readingPinyin=!state.readingPinyin;renderReading();};
   document.querySelectorAll('[data-speak]').forEach(b=>b.onclick=()=>speak(b.dataset.speak));
   document.getElementById('checkReading').onclick=()=>checkReading(r);
 }
 function checkReading(r){
-  let score=0;r.questions.forEach((q,qi)=>{const selected=document.querySelector('input[name="rq'+qi+'"]:checked');const val=selected?Number(selected.value):-1;const ok=val===q.answer;if(ok)score++;const box=document.getElementById('rqf'+qi);box.innerHTML='<div class="answer-note '+(ok?'good':'bad')+'"><b>'+(ok?'Correct':'Answer: '+esc(q.options[q.answer]))+'</b><p>'+esc(q.explanation||'')+'</p></div>';});
+  let score=0;state.readingChecked=true;r.questions.forEach((q,qi)=>{const selected=document.querySelector('input[name="rq'+qi+'"]:checked');const val=selected?Number(selected.value):-1;const ok=val===q.answer;if(ok)score++;const box=document.getElementById('rqf'+qi);box.innerHTML='<div class="answer-note '+(ok?'good':'bad')+'"><b>'+(ok?'Correct':'Answer: '+esc(q.options[q.answer]))+'</b><p>'+esc(q.explanation||'')+'</p></div>';});
   markStudy();ping(score+' / '+r.questions.length+' correct');
 }
 
