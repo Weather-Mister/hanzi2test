@@ -65,7 +65,7 @@ function speak(text,rate=1){
   if(!('speechSynthesis' in window)){ping('Speech is unavailable in this browser.');return;}
   speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='zh-TW';u.rate=rate;speechSynthesis.speak(u);
 }
-async function getJSON(path){const r=await fetch(path,{cache:'no-store'});if(!r.ok)throw new Error('Could not load '+path);return r.json();}
+async function getJSON(path){const r=await fetch(path,{cache:'force-cache'});if(!r.ok)throw new Error('Could not load '+path);return r.json();}
 async function loadUnit(id){
   if(state.unitCache.has(id))return state.unitCache.get(id);
   const data=await getJSON(DATA+'units/'+id+'.json');state.unitCache.set(id,data);return data;
@@ -108,55 +108,71 @@ function setView(v){
   state.view=v;if(v==='course')state.subview='learn';
   window.scrollTo({top:0,behavior:'instant'});render();
 }
-function renderCourse(){
+async function renderCourse(){
   if(state.lesson){renderLesson();return;}
-  const current=firstCurrentUnit(); if(!state.unit)state.unit=current;
-  const chosen=state.unit||current;
   const units=orderedUnits(state.selectedBook);
-  const visible=units;
+  const current=firstCurrentUnit();
+  if(!state.unit || state.unit.book!==state.selectedBook)state.unit=current;
+  const chosen=state.unit||current;
+  let data;
+  try{data=await loadUnit(chosen.id);}catch(err){app.innerHTML='<section class="loading-state"><div class="ink-loader">誤</div><h1>Could not open this unit.</h1><p>'+esc(err.message)+'</p></section>';return;}
+  const unitOpen=unitUnlocked(chosen);
+  const nextLesson=data.lessons.find(l=>!completedLesson(l.id))||data.lessons[0];
+  const doneLessons=data.lessons.filter(l=>completedLesson(l.id)).length;
   const titleBook=state.selectedBook==='book-1'?'Book 1':'Book 2';
-  app.innerHTML=tabs('learn')+
+
+  app.innerHTML=
    '<section class="banner">'+
     '<div class="kicker">'+esc(titleBook)+' · '+esc(chosen.label||'Course unit')+'</div>'+
     '<h1 lang="zh-Hant-TW">'+esc(chosen.goal?.text||chosen.banner?.text||chosen.title)+'</h1>'+
     (state.pinyin?'<div class="py">'+esc(chosen.goal?.pinyin||chosen.banner?.pinyin||'')+'</div>':'')+
     '<p>'+esc(chosen.description||'')+'</p>'+
     '<div class="bannerline"></div>'+
-    '<div class="bannerbottom"><div class="progresscopy">UNIT '+esc(chosen.displayNumber)+' · '+esc(unitDone(chosen)?'COMPLETE':'IN PROGRESS')+'</div>'+
-    '<button class="inkbutton red" data-open-unit="'+esc(chosen.id)+'">'+(unitDone(chosen)?'Review':'Continue')+'</button></div>'+
-   '</section>'+
-   '<div class="book-switch"><button class="'+(state.selectedBook==='book-1'?'active':'')+'" data-book="book-1">第一冊 · Book 1</button><button class="'+(state.selectedBook==='book-2'?'active':'')+'" data-book="book-2">第二冊 · Book 2</button></div>'+
-   '<div class="section-title"><h2>學習之路 · Learning Path</h2><div class="small">'+esc(units.length)+' units</div></div>'+
-   '<div class="path">'+visible.map((u,i)=>unitRow(u,i)).join('')+'</div>'+
+    '<div class="bannerbottom"><div class="progresscopy">'+doneLessons+' / '+data.lessons.length+' LESSONS COMPLETE</div>'+
+    (unitOpen?'<button class="inkbutton red" data-lesson="'+esc(nextLesson.id)+'">'+(completedLesson(nextLesson.id)?'Review':'Continue')+'</button>':'<button class="inkbutton" disabled>Locked</button>')+
+    '</div></section>'+
+   '<div class="course-controls">'+
+     '<div class="book-switch"><button class="'+(state.selectedBook==='book-1'?'active':'')+'" data-book="book-1">第一冊 · Book 1</button><button class="'+(state.selectedBook==='book-2'?'active':'')+'" data-book="book-2">第二冊 · Book 2</button></div>'+
+     '<label class="unit-selector"><span>單元 · Unit</span><select id="unitSelect">'+units.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===chosen.id?'selected':'')+'>'+esc(String(u.displayNumber).padStart(2,'0'))+' · '+esc(u.title)+(unitDone(u)?' ✓':'')+'</option>').join('')+'</select></label>'+
+   '</div>'+
+   '<div class="section-title"><h2>課程之路 · Lesson Path</h2><div class="small">'+doneLessons+' / '+data.lessons.length+'</div></div>'+
+   '<div class="path lesson-path">'+data.lessons.map((l,i)=>lessonRow(l,i,data,unitOpen)).join('')+'</div>'+
    '<div class="divider"></div>'+
    '<div class="sidecards">'+
      '<div class="sidecard"><div class="sidehead"><b>本單元 · Characters</b><span>'+esc(chosen.chars?.length||0)+' characters</span></div><div class="chars">'+(chosen.chars||[]).slice(0,10).map(c=>'<button class="char" data-char="'+esc(c)+'">'+esc(c)+'</button>').join('')+'</div></div>'+
-     '<div class="sidecard"><div class="sidehead"><b>今日目標 · Goal</b><span>'+esc(chosen.lessonCount)+' lessons</span></div><div class="goal"><div class="goalhan">'+esc(chosen.banner?.text?.[0]||chosen.chars?.[0]||'學')+'</div><div class="goalcopy"><b>'+esc(chosen.goal?.text||chosen.title)+'</b>'+(state.pinyin?'<span>'+esc(chosen.goal?.pinyin||'')+'</span>':'')+'<span>'+esc(chosen.goal?.meaning||chosen.description)+'</span></div></div></div>'+
+     '<div class="sidecard"><div class="sidehead"><b>單元目標 · Goal</b><span>'+esc(data.lessons.length)+' lessons</span></div><div class="goal"><div class="goalhan">'+esc(chosen.banner?.text?.[0]||chosen.chars?.[0]||'學')+'</div><div class="goalcopy"><b>'+esc(chosen.goal?.text||chosen.title)+'</b>'+(state.pinyin?'<span>'+esc(chosen.goal?.pinyin||'')+'</span>':'')+'<span>'+esc(chosen.goal?.meaning||chosen.description)+'</span></div></div></div>'+
    '</div>';
+
+  const selector=document.getElementById('unitSelect');
+  if(selector)selector.onchange=()=>openUnit(selector.value);
   bindCommon();
+
+  const i=units.findIndex(u=>u.id===chosen.id);
+  [units[i-1],units[i+1]].filter(Boolean).forEach(u=>{if(!state.unitCache.has(u.id))loadUnit(u.id).catch(()=>{});});
 }
-function unitRow(u,i){
-  const done=unitDone(u),unlocked=unitUnlocked(u),current=!done&&unlocked;
-  const c=u.chars?.[0]||u.banner?.text?.[0]||'學';
+function lessonRow(l,i,data,unitOpen){
+  const done=completedLesson(l.id);
+  const previousDone=i===0 || data.lessons.slice(0,i).every(x=>completedLesson(x.id));
+  const unlocked=unitOpen&&previousDone;
+  const current=!done&&unlocked;
+  const c=l.chars?.[0]||String(i+1);
   return '<div class="row '+(done?'done':current?'current':'locked')+'">'+
-   '<div class="nodewrap"><button class="node" '+(unlocked?'data-unit="'+esc(u.id)+'"':'disabled')+'>'+esc(c)+'</button></div>'+
+   '<div class="nodewrap"><button class="node" '+(unlocked?'data-lesson="'+esc(l.id)+'"':'disabled')+'>'+esc(c)+'</button></div>'+
    '<div class="card">'+(done?'<span class="completedmark">✓</span>':'')+
-    '<div class="step">'+(u.book==='book-1'?'Unit ':'Book 2 · Unit ')+esc(u.displayNumber)+(done?' · Complete':current?' · Current':' · Locked')+'</div>'+
-    '<h3>'+esc(u.title)+'</h3><p>'+esc(u.description)+'</p>'+
-    '<div class="meta"><span>'+esc(u.lessonCount)+' lessons</span><span>'+esc(u.chars?.length||0)+' characters</span></div>'+
-    (unlocked?'<button class="inkbutton '+(current?'red':'')+'" data-open-unit="'+esc(u.id)+'">'+(done?'Review':'Open unit')+'</button>':'')+
+    '<div class="step">Lesson '+(i+1)+(done?' · Complete':current?' · Next':' · Locked')+'</div>'+
+    '<h3>'+esc(l.title)+'</h3><p>'+esc(l.subtitle||'')+'</p>'+
+    '<div class="meta"><span>'+esc(l.minutes||'')+'</span><span>'+esc(l.steps?.length||0)+' steps</span></div>'+
+    (unlocked?'<button class="inkbutton '+(current?'red':'')+'" data-lesson="'+esc(l.id)+'">'+(done?'Review lesson':'Start lesson')+'</button>':'')+
    '</div></div>';
 }
 async function openUnit(id){
-  state.unit=state.catalog.units.find(u=>u.id===id)||state.unit;
-  const data=await loadUnit(id);
-  openSheet('<div class="sheet-handle"></div><div class="sheet-kicker">UNIT '+esc(state.unit.displayNumber)+'</div><h2>'+esc(state.unit.title)+'</h2><p class="sheet-desc">'+esc(state.unit.description)+'</p>'+
-    '<div class="lesson-list">'+data.lessons.map((l,i)=>{
-      const p=lessonProgress(l.id),done=p.complete;
-      const previous=i===0 || data.lessons.slice(0,i).every(x=>completedLesson(x.id));
-      const unlocked=previous;
-      return '<button class="lesson-line '+(done?'done':'')+'" '+(unlocked?'data-lesson="'+esc(l.id)+'"':'disabled')+'><span class="lesson-number">'+(done?'✓':String(i+1))+'</span><span><b>'+esc(l.title)+'</b><small>'+esc(l.subtitle)+' · '+esc(l.minutes)+'</small></span><i>'+(unlocked?'›':'鎖')+'</i></button>';
-    }).join('')+'</div>');
+  const meta=state.catalog.units.find(u=>u.id===id);
+  if(!meta)return;
+  state.unit=meta;
+  state.selectedBook=meta.book;
+  save();
+  window.scrollTo({top:0,behavior:'instant'});
+  await renderCourse();
 }
 async function startLesson(id){
   closeSheet();
@@ -297,7 +313,7 @@ function finishLesson(){
 }
 
 function renderPractice(){
-  app.innerHTML=tabs('practice')+'<div class="simplepage"><div class="kicker ink">Practice Hall</div><h1>練習</h1><p>Everything runs locally. Search and handwriting are always unlocked.</p>'+
+  app.innerHTML='<div class="simplepage"><div class="kicker ink">Practice Hall</div><h1>練習</h1><p>Everything runs locally. Search and handwriting are always unlocked.</p>'+
    '<div class="practice-grid">'+
     '<button class="practice" data-practice="mega"><b>Mega Challenge</b><span>Hanzi → meaning</span><i>大</i></button>'+
     '<button class="practice" data-practice="reverse"><b>Reverse Mega</b><span>Hanzi → pinyin input</span><i>音</i></button>'+
@@ -384,7 +400,7 @@ function openWritingPractice(char){
 }
 
 function renderReadingList(){
-  app.innerHTML=tabs('reading')+'<div class="simplepage"><div class="kicker ink">Reading Path · Fully unlocked</div><h1>讀 · Reading</h1><p>All comprehension checkpoints are available immediately. Progress is saved only on this device.</p><div class="reading-list">'+state.readings.map((r,i)=>'<button class="reading-item" data-reading="'+esc(r.id)+'"><span class="seal mini">讀</span><span><small>'+esc(r.unitId.replace('unit-','Unit '))+' · '+esc(r.kind)+'</small><b>'+esc(r.title)+'</b><em>'+esc(r.lines.length)+' lines · '+esc(r.questions.length)+' questions</em></span><i>›</i></button>').join('')+'</div></div>';
+  app.innerHTML='<div class="simplepage"><div class="kicker ink">Reading Path · Fully unlocked</div><h1>讀 · Reading</h1><p>All comprehension checkpoints are available immediately. Progress is saved only on this device.</p><div class="reading-list">'+state.readings.map((r,i)=>'<button class="reading-item" data-reading="'+esc(r.id)+'"><span class="seal mini">讀</span><span><small>'+esc(r.unitId.replace('unit-','Unit '))+' · '+esc(r.kind)+'</small><b>'+esc(r.title)+'</b><em>'+esc(r.lines.length)+' lines · '+esc(r.questions.length)+' questions</em></span><i>›</i></button>').join('')+'</div></div>';
   bindCommon();document.querySelectorAll('[data-reading]').forEach(b=>b.onclick=()=>openReading(b.dataset.reading));
 }
 function openReading(id){
@@ -411,7 +427,7 @@ function checkReading(r){
 }
 
 function renderListeningList(){
-  app.innerHTML=tabs('listening')+'<div class="simplepage"><div class="kicker ink">Listening Path · Fully unlocked</div><h1>聽 · Listening</h1><p>All listening items and scene transcripts are open immediately.</p><div class="listening-stage-grid">'+
+  app.innerHTML='<div class="simplepage"><div class="kicker ink">Listening Path · Fully unlocked</div><h1>聽 · Listening</h1><p>All listening items and scene transcripts are open immediately.</p><div class="listening-stage-grid">'+
    state.listening.items.map(x=>'<button class="listening-stage" data-listen-item="'+esc(x.id)+'"><span class="seal mini">聽</span><h3>'+esc(x.phrase?.meaning||x.id)+'</h3><p>'+esc(x.reason||'')+'</p><small>Meaning + pinyin</small></button>').join('')+'</div>'+
    '<div class="divider"></div><div class="section-title"><h2>場景 · Listening scenes</h2><div class="small">'+state.listening.scenes.length+' scenes</div></div><div class="reading-list">'+state.listening.scenes.map(s=>'<button class="reading-item" data-listen-scene="'+esc(s.id)+'"><span class="seal mini">聲</span><span><small>'+esc(s.kind)+' · '+esc(s.unitId)+'</small><b>'+esc(s.title)+'</b><em>'+s.lines.length+' clips</em></span><i>›</i></button>').join('')+'</div></div>';
   bindCommon();document.querySelectorAll('[data-listen-item]').forEach(b=>b.onclick=()=>openListenItem(b.dataset.listenItem));document.querySelectorAll('[data-listen-scene]').forEach(b=>b.onclick=()=>openListenScene(b.dataset.listenScene));
@@ -473,6 +489,7 @@ function bindCommon(){
   document.querySelectorAll('[data-book]').forEach(b=>b.onclick=()=>{state.selectedBook=b.dataset.book;state.unit=null;save();renderCourse();});
   document.querySelectorAll('[data-unit]').forEach(b=>b.onclick=()=>{state.unit=state.catalog.units.find(u=>u.id===b.dataset.unit);renderCourse();});
   document.querySelectorAll('[data-open-unit]').forEach(b=>b.onclick=()=>openUnit(b.dataset.openUnit));
+  document.querySelectorAll('[data-lesson]').forEach(b=>b.onclick=()=>startLesson(b.dataset.lesson));
   document.querySelectorAll('[data-char]').forEach(b=>b.onclick=()=>openCharacter(b.dataset.char));
   document.querySelectorAll('[data-speak]').forEach(b=>b.onclick=()=>speak(b.dataset.speak));
   document.querySelectorAll('[data-exit-lesson]').forEach(b=>b.onclick=()=>{state.lesson=null;state.stepIndex=0;renderCourse();});
