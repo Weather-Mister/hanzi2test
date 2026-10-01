@@ -309,40 +309,72 @@ function renderPractice(){
 function practicePool(){
   return Object.values(state.catalog.characters).filter(c=>c&&c.hanzi&&c.meaning);
 }
+function practiceWordPool(){
+  const seen=new Set();
+  return state.catalog.vocabulary.filter(w=>{
+    if(!w?.text||!w?.meaning||!/[\u3400-\u9fff]/.test(w.text)||seen.has(w.text))return false;
+    seen.add(w.text);return true;
+  });
+}
+function meaningAccepted(input,meaning){
+  const n=norm(input);if(!n)return false;
+  const raw=String(meaning||'').replace(/\([^)]*\)/g,'');
+  const alts=[raw,...raw.split(/\s*;\s*|\s+\/\s+|,\s+/)]
+    .map(x=>norm(x.replace(/^to\s+/i,''))).filter(Boolean);
+  return alts.includes(n)||alts.some(x=>x.length>=4&&n===x.replace(/^to/,''));
+}
 function startPractice(mode){
-  const pool=practicePool();
   if(mode==='write'){
-    openSheet('<div class="sheet-handle"></div><div class="sheet-kicker">HANDWRITING</div><h2>Choose any character</h2><input id="practiceCharSearch" class="search" placeholder="Search character, pinyin, or meaning"><div id="practiceChars" class="char-pick-grid"></div>');
+    const pool=practicePool();
+    openSheet('<div class="sheet-handle"></div><div class="sheet-kicker">HANDWRITING · ALL UNLOCKED</div><h2>Choose any character</h2><input id="practiceCharSearch" class="search" placeholder="Search character, pinyin, or meaning"><div id="practiceChars" class="char-pick-grid"></div>');
     const input=document.getElementById('practiceCharSearch'),box=document.getElementById('practiceChars');
-    const draw=()=>{const q=norm(input.value);box.innerHTML=pool.filter(c=>!q||norm(c.hanzi+c.pinyin+c.meaning).includes(q)).slice(0,120).map(c=>'<button data-write-char="'+esc(c.hanzi)+'"><b>'+esc(c.hanzi)+'</b><span>'+esc(c.pinyin)+'</span></button>').join('');box.querySelectorAll('[data-write-char]').forEach(b=>b.onclick=()=>openWritingPractice(b.dataset.writeChar));};input.oninput=draw;draw();return;
+    const draw=()=>{const q=norm(input.value);box.innerHTML=pool.filter(c=>!q||norm(c.hanzi+c.pinyin+c.meaning).includes(q)).slice(0,160).map(c=>'<button data-write-char="'+esc(c.hanzi)+'"><b>'+esc(c.hanzi)+'</b><span>'+esc(c.pinyin)+'</span></button>').join('');box.querySelectorAll('[data-write-char]').forEach(b=>b.onclick=()=>openWritingPractice(b.dataset.writeChar));};
+    input.oninput=draw;draw();return;
   }
-  let list=pool;
+  let list=practiceWordPool();
   if(mode==='review'){
-    list=[...pool].sort((a,b)=>((state.progress.attempts['mega-'+b.hanzi]?.wrong||0)-(state.progress.attempts['mega-'+a.hanzi]?.wrong||0))).slice(0,30);
-  }else list=shuffle(pool).slice(0,50);
-  state.quiz={mode,list,index:0,right:0,wrong:0};renderPracticeQuestion();
+    list=[...list].sort((a,b)=>{
+      const aa=state.progress.attempts['mega-word-'+a.text]||{},bb=state.progress.attempts['mega-word-'+b.text]||{};
+      if(Boolean(aa.mastered)!==Boolean(bb.mastered))return aa.mastered?1:-1;
+      return ((bb.wrong||0)-(bb.right||0))-((aa.wrong||0)-(aa.right||0));
+    });
+  }else list=shuffle(list);
+  state.quiz={mode:mode==='review'?'mega':mode,review:mode==='review',list,index:0,right:0,wrong:0,revealed:false,lastResult:null};
+  renderPracticeQuestion();
 }
 function renderPracticeQuestion(){
   const q=state.quiz;if(!q)return;
-  if(q.index>=q.list.length){app.innerHTML='<div class="finish-screen"><div class="seal big">成</div><h1>Round complete</h1><p>'+q.right+' correct · '+q.wrong+' missed</p><button class="inkbutton red" data-back-practice>Back to practice</button></div>';document.querySelector('[data-back-practice]').onclick=()=>{state.quiz=null;renderPractice();};return;}
-  const item=q.list[q.index];
-  if(q.mode==='reverse'){
-    app.innerHTML='<div class="practice-session"><button class="backbtn" data-back-practice>‹</button><div class="practice-count">'+(q.index+1)+' / '+q.list.length+'</div><div class="mega-char">'+esc(item.hanzi)+'</div><div class="mega-meaning">'+esc(item.meaning)+'</div><form id="pinyinForm"><input class="pinyin-input" id="pinyinInput" autocomplete="off" autocapitalize="off" placeholder="Type pinyin: ni3 / nǐ"><button class="inkbutton red">Check</button></form><div id="practiceFeedback"></div></div>';
-    document.querySelector('[data-back-practice]').onclick=()=>{state.quiz=null;renderPractice();};
-    document.getElementById('pinyinForm').onsubmit=e=>{e.preventDefault();const input=document.getElementById('pinyinInput').value;const ok=samePinyin(input,item.pinyin);practiceResult(item,ok,'<b>'+esc(item.pinyin)+'</b> · '+esc(item.meaning));};
-  }else{
-    const distract=shuffle(q.list.filter(x=>x.hanzi!==item.hanzi)).slice(0,3);
-    const options=shuffle([item,...distract]);
-    app.innerHTML='<div class="practice-session"><button class="backbtn" data-back-practice>‹</button><div class="practice-count">'+(q.index+1)+' / '+q.list.length+'</div><div class="mega-char">'+esc(item.hanzi)+'</div>'+(state.pinyin?'<div class="mega-pinyin">'+esc(item.pinyin)+'</div>':'')+'<div class="choice-grid">'+options.map(o=>'<button class="choice" data-mega="'+esc(o.hanzi)+'">'+esc(o.meaning)+'</button>').join('')+'</div><div id="practiceFeedback"></div></div>';
-    document.querySelector('[data-back-practice]').onclick=()=>{state.quiz=null;renderPractice();};
-    document.querySelectorAll('[data-mega]').forEach(b=>b.onclick=()=>practiceResult(item,b.dataset.mega===item.hanzi,'<b>'+esc(item.meaning)+'</b> · '+esc(item.pinyin)));
+  if(q.index>=q.list.length){
+    app.innerHTML='<div class="finish-screen"><div class="seal big">成</div><h1>Round complete</h1><p>'+q.right+' correct · '+q.wrong+' missed</p><button class="inkbutton red" data-back-practice>Back to practice</button></div>';
+    document.querySelector('[data-back-practice]').onclick=()=>{state.quiz=null;renderPractice();};return;
   }
+  const item=q.list[q.index],rec=state.progress.attempts['mega-word-'+item.text]||{};
+  app.innerHTML='<div class="practice-session"><button class="backbtn" data-back-practice>‹</button><div class="practice-count">'+(q.index+1)+' / '+q.list.length+(q.review?' · SMART REVIEW':'')+'</div>'+
+   '<div class="mega-char">'+esc(item.text)+'</div>'+
+   '<div class="mega-meaning">'+(q.mode==='reverse'?esc(item.meaning):'What does this mean?')+'</div>'+
+   (q.revealed?'<div class="paper-panel" style="text-align:center"><b>'+esc(item.pinyin)+'</b><p>'+esc(item.meaning)+'</p></div>':
+    '<form id="megaForm"><input class="pinyin-input" id="megaInput" autocomplete="off" autocapitalize="off" placeholder="'+(q.mode==='reverse'?'Type pinyin: ni3 / nǐ / ni':'Type the English meaning')+'"><button class="inkbutton red">Check</button></form>')+
+   '<div id="practiceFeedback">'+(q.lastResult?'<div class="answer-note '+(q.lastResult.ok?'good':'bad')+'"><b>'+esc(q.lastResult.title)+'</b><p>'+esc(q.lastResult.text)+'</p></div>':'')+'</div>'+
+   '<div class="practice-actions mega-actions"><button class="ghostbutton" data-mega-skip>Skip</button><button class="ghostbutton" data-mega-giveup>Give up</button><button class="ghostbutton '+(rec.mastered?'mastered':'')+'" data-mega-mastered>'+(rec.mastered?'✓ Mastered':'Mastered')+'</button></div>'+
+   ((q.revealed||q.lastResult)?'<button class="inkbutton red" style="width:100%;margin-top:9px" data-mega-next>Next</button>':'')+
+   '</div>';
+  document.querySelector('[data-back-practice]').onclick=()=>{state.quiz=null;renderPractice();};
+  const form=document.getElementById('megaForm');
+  if(form)form.onsubmit=e=>{e.preventDefault();const input=document.getElementById('megaInput').value;const ok=q.mode==='reverse'?samePinyin(input,item.pinyin):meaningAccepted(input,item.meaning);practiceResult(item,ok);};
+  document.querySelector('[data-mega-skip]').onclick=()=>{q.index++;q.revealed=false;q.lastResult=null;renderPracticeQuestion();};
+  document.querySelector('[data-mega-giveup]').onclick=()=>{recordAttempt('mega-word-'+item.text,false);q.wrong++;q.revealed=true;q.lastResult={ok:false,title:'Answer revealed',text:item.pinyin+' · '+item.meaning};renderPracticeQuestion();};
+  document.querySelector('[data-mega-mastered]').onclick=()=>{
+    const k='mega-word-'+item.text,a=state.progress.attempts[k]||{right:0,wrong:0,last:0};a.mastered=true;a.right=Math.max(a.right||0,3);a.last=Date.now();state.progress.attempts[k]=a;markStudy();save();
+    q.revealed=true;q.lastResult={ok:true,title:'Marked mastered',text:item.pinyin+' · '+item.meaning};renderPracticeQuestion();
+  };
+  const next=document.querySelector('[data-mega-next]');if(next)next.onclick=()=>{q.index++;q.revealed=false;q.lastResult=null;renderPracticeQuestion();};
+  setTimeout(()=>document.getElementById('megaInput')?.focus(),0);
 }
-function practiceResult(item,ok,html){
-  const q=state.quiz;if(!q)return;q[ok?'right':'wrong']++;recordAttempt('mega-'+item.hanzi,ok);
-  document.querySelectorAll('.choice,.pinyin-input,#pinyinForm button').forEach(x=>x.disabled=true);
-  const box=document.getElementById('practiceFeedback');box.innerHTML='<div class="answer-note '+(ok?'good':'bad')+'"><b>'+(ok?'Correct':'Answer')+'</b><p>'+html+'</p></div><button class="inkbutton red" id="nextPractice">Next</button>';
-  document.getElementById('nextPractice').onclick=()=>{q.index++;renderPracticeQuestion();};
+function practiceResult(item,ok){
+  const q=state.quiz;if(!q)return;
+  q[ok?'right':'wrong']++;recordAttempt('mega-word-'+item.text,ok);
+  q.revealed=true;q.lastResult={ok,title:ok?'Correct':'Answer',text:item.pinyin+' · '+item.meaning};
+  renderPracticeQuestion();
 }
 function openWritingPractice(char){
   closeSheet();
